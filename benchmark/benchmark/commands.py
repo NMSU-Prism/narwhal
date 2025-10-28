@@ -18,11 +18,13 @@ class CommandMaker:
 
     @staticmethod
     def compile():
+        # Local compile used during _config(); remote builds are handled in remote._update()
         return 'cargo build --quiet --release --features benchmark'
 
     @staticmethod
     def generate_key(filename):
         assert isinstance(filename, str)
+        # local keygen uses local binary path; remote will upload generated keys
         return f'./node generate_keys --filename {filename}'
 
     @staticmethod
@@ -32,8 +34,10 @@ class CommandMaker:
         assert isinstance(parameters, str)
         assert isinstance(debug, bool)
         v = '-vvv' if debug else '-vv'
-        return (f'./node {v} run --keys {keys} --committee {committee} '
-                f'--store {store} --parameters {parameters} primary')
+        # Use BIN_PREFIX if provided; defaults to current dir
+        return (f'${{BIN_PREFIX:-.}}/node {v} run --keys {keys} '
+                f'--committee {committee} --store {store} '
+                f'--parameters {parameters} primary')
 
     @staticmethod
     def run_worker(keys, committee, store, parameters, id, debug=False):
@@ -42,8 +46,9 @@ class CommandMaker:
         assert isinstance(parameters, str)
         assert isinstance(debug, bool)
         v = '-vvv' if debug else '-vv'
-        return (f'./node {v} run --keys {keys} --committee {committee} '
-                f'--store {store} --parameters {parameters} worker --id {id}')
+        return (f'${{BIN_PREFIX:-.}}/node {v} run --keys {keys} '
+                f'--committee {committee} --store {store} '
+                f'--parameters {parameters} worker --id {id}')
 
     @staticmethod
     def run_client(address, size, rate, nodes):
@@ -53,7 +58,7 @@ class CommandMaker:
         assert isinstance(nodes, list)
         assert all(isinstance(x, str) for x in nodes)
         nodes = f'--nodes {" ".join(nodes)}' if nodes else ''
-        return f'./benchmark_client {address} --size {size} --rate {rate} {nodes}'
+        return f'${{BIN_PREFIX:-.}}/benchmark_client {address} --size {size} --rate {rate} {nodes}'
 
     @staticmethod
     def kill():
@@ -61,6 +66,7 @@ class CommandMaker:
 
     @staticmethod
     def alias_binaries(origin):
+        # Keep original local symlink helper (not used remotely)
         assert isinstance(origin, str)
         node, client = join(origin, 'node'), join(origin, 'benchmark_client')
-        return f'rm node ; rm benchmark_client ; ln -s {node} . ; ln -s {client} .'
+        return f'rm -f node ; rm -f benchmark_client ; ln -s {node} . ; ln -s {client} .'

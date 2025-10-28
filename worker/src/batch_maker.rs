@@ -15,6 +15,14 @@ use std::convert::TryInto as _;
 use std::net::SocketAddr;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::time::{sleep, Duration, Instant};
+use std::process::Command;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::path::Path;
+use std::path::PathBuf;
+use std::fs;
+
+
 
 #[cfg(test)]
 #[path = "tests/batch_maker_tests.rs"]
@@ -69,6 +77,8 @@ impl BatchMaker {
 
     /// Main loop receiving incoming transactions and creating batches.
     async fn run(&mut self) {
+
+        println!("BatchMaker running");
         let timer = sleep(Duration::from_millis(self.max_batch_delay));
         tokio::pin!(timer);
 
@@ -76,6 +86,75 @@ impl BatchMaker {
             tokio::select! {
                 // Assemble client transactions into batches of preset size.
                 Some(transaction) = self.rx_transaction.recv() => {
+
+                //new command
+                fn run_go_benchmark() {
+                // Build and execute the command
+                let output = Command::new("go")
+                    .arg("test")
+                    .arg("-run=^$")
+                    .arg("-bench=^BenchmarkEVM$")
+                    .arg("-benchmem")
+                    .arg("-count=1")
+                    .current_dir("/home/santoshadhikari/go-ethereum/tests") // set working dir
+                    .output() // blocks until command finishes
+                    .expect("Failed to run Go benchmark");
+
+                        // Print results
+                        println!("Go benchmark completed with status: {}", output.status);
+                        println!("--- STDOUT ---\n{}", String::from_utf8_lossy(&output.stdout));
+                        eprintln!("--- STDERR ---\n{}", String::from_utf8_lossy(&output.stderr));
+
+               
+                       // let mut file = File::create("/home/santoshadhikari/go-ethereum/tests/output.log"); // Creates or overwrites the file
+                       // writeln!(file, "executed successfully")?;
+
+                          let output_dir = PathBuf::from("/home/santoshadhikari/go-ethereum/tests/output");
+                            let output_file_path = output_dir.join("output3.txt");
+                            //test
+                            // Ensure directory exists
+                            if let Err(e) = fs::create_dir_all(&output_dir) {
+                                eprintln!("❌ Failed to create directory {:?}: {}", output_dir, e);
+                                return;
+                            }
+
+                            println!("Attempting to write to {:?}", output_file_path);
+
+                            let file = match File::create(&output_file_path) {
+                                Ok(f) => f,
+                                Err(e) => {
+                                    eprintln!("❌ Failed to create file {:?}: {}", output_file_path, e);
+                                    return;
+                                }
+                            };
+
+                            let mut writer = BufWriter::new(file);
+
+                            if let Err(e) = writeln!(writer, "Hello, World!") {
+                                eprintln!("❌ Failed to write to file: {}", e);
+                                return;
+                            }
+
+                            if let Err(e) = writer.flush() {
+                                eprintln!("❌ Failed to flush writer: {}", e);
+                                return;
+                            }
+
+                        // Check success
+                        if !output.status.success() {
+                            panic!("Go benchmark failed!");
+                        }
+
+                        // Continue execution here only after benchmark completes successfully
+                        println!("Continuing execution after Go benchmark...");
+                }
+                run_go_benchmark(); // <-- Now calls the globally defined function
+                println!("Now executing next part...");
+
+
+
+
+
                     self.current_batch_size += transaction.len();
                     self.current_batch.push(transaction);
                     if self.current_batch_size >= self.batch_size {
