@@ -3,7 +3,7 @@
     "name": "local",
     "path": "/home/santoshadhikari/.ssh/narwhal_rsa"
   },
-  "ssh_user": "santosh",
+  "ssh_user": "santoshadhikari",
   "port": 5000,
   "repo": {
     "name": "narwhal",
