@@ -93,8 +93,8 @@ class Bench:
             'export PATH="$HOME/.cargo/bin:$PATH"',
 
             # clone if missing, else pull
-            #f'[ -d {self.settings.repo_name} ] || git clone {self.settings.repo_url} {self.settings.repo_name}',
-            #f'(cd {self.settings.repo_name} && git pull -f)'
+            f'[ -d {self.settings.repo_name} ] || git clone {self.settings.repo_url} {self.settings.repo_name}',
+            f'(cd {self.settings.repo_name} && git pull -f)'
         ]
         ips = self.manager.hosts(flat=True)
         try:
@@ -164,22 +164,22 @@ class Bench:
             ips = list(set([x for y in hosts for x in y]))
 
         Print.info(f'Updating {len(ips)} machines (branch "{self.settings.branch}")...')
-       # cmd = [
-            # ensure repo exists
-            #f'[ -d {self.settings.repo_name} ] || git clone {self.settings.repo_url} {self.settings.repo_name}',
-            #f'(cd {self.settings.repo_name} && git fetch -f)',
-            #f'(cd {self.settings.repo_name} && git checkout -f {self.settings.branch})',
-            #f'(cd {self.settings.repo_name} && git pull -f)',
-            # cargo on PATH then build all bins with benchmark feature
-            #'export PATH="$HOME/.cargo/bin:$PATH"',
-            #f'(cd {self.settings.repo_name} && cargo build --release --features benchmark)',
-       # ]
-        bin_dir =  f'./{self.settings.repo_name}/target/release'
         cmd = [
-            f'test -d {self.settings.repo_name} || (echo "Missing repo {self.settings.repo_name}" && false)',
-            'source $HOME/.cargo/env || true',
-            CommandMaker.alias_binaries(bin_dir)
+                #ensure repo exists
+                f'[ -d {self.settings.repo_name} ] || git clone {self.settings.repo_url} {self.settings.repo_name}',
+                f'(cd {self.settings.repo_name} && git fetch -f)',
+                f'(cd {self.settings.repo_name} && git checkout -f {self.settings.branch})',
+                f'(cd {self.settings.repo_name} && git pull -f)',
+                #cargo on PATH then build all bins with benchmark feature
+                'export PATH="$HOME/.cargo/bin:$PATH"',
+                f'(cd {self.settings.repo_name} && cargo build --release --features benchmark)',
         ]
+        # bin_dir =  f'./{self.settings.repo_name}/target/release'
+        # cmd = [
+        #     f'test -d {self.settings.repo_name} || (echo "Missing repo {self.settings.repo_name}" && false)',
+        #     'source $HOME/.cargo/env || true',
+        #     CommandMaker.alias_binaries(bin_dir)
+        # ]
 
         g = Group(*self._host_strings(ips), connect_kwargs=self.connect)
         g.run(' && '.join(cmd), hide=True)

@@ -7,7 +7,7 @@
   "port": 5000,
   "repo": {
     "name": "narwhal",
-    "url": "https://github.com/asonnino/narwhal.git",
+    "url": "https://github.com/NMSU-Prism/narwhal.git",
     "branch": "master"
   },
   "hosts": [
