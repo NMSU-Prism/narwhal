@@ -1,7 +1,7 @@
 {
   "key": {
     "name": "local",
-    "path": "/home/santoshadhikari/.ssh/id_ed25519"
+    "path": "/home/santoshadhikari/.ssh/narwhal_rsa"
   },
   "ssh_user": "santoshadhikari",
   "port": 5000,
