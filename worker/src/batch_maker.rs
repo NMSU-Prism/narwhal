@@ -96,7 +96,7 @@ impl BatchMaker {
                     .arg("-bench=^BenchmarkEVM$")
                     .arg("-benchmem")
                     .arg("-count=1")
-                    .current_dir("/home/santoshadhikari/go-ethereum/tests") // set working dir
+                    .current_dir("/home/narwhal/go-ethereum/tests") // set working dir
                     .output() // blocks until command finishes
                     .expect("Failed to run Go benchmark");
 
@@ -109,7 +109,7 @@ impl BatchMaker {
                        // let mut file = File::create("/home/santoshadhikari/go-ethereum/tests/output.log"); // Creates or overwrites the file
                        // writeln!(file, "executed successfully")?;
 
-                          let output_dir = PathBuf::from("/home/santoshadhikari/go-ethereum/tests/output");
+                          let output_dir = PathBuf::from("/home/narwhal/go-ethereum/tests/output");
                             let output_file_path = output_dir.join("output3.txt");
                             //test
                             // Ensure directory exists
