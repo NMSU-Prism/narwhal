@@ -10,6 +10,11 @@ from math import ceil
 from copy import deepcopy
 import subprocess
 
+#new added
+#import logging
+#logging.basicConfig(level=logging.DEBUG)
+
+
 from benchmark.config import Committee, Key, NodeParameters, BenchParameters, ConfigError
 from benchmark.utils import BenchError, Print, PathMaker, progress_bar
 from benchmark.commands import CommandMaker
@@ -34,12 +39,18 @@ class Bench:
         self.settings = self.manager.settings
         try:
             ctx.connect_kwargs.pkey = RSAKey.from_private_key_file(self.settings.key_path)
+           #new added
+            print(f"Key path: {self.settings.key_path}")
+           
             self.connect = ctx.connect_kwargs
         except (IOError, PasswordRequiredException, SSHException) as e:
             raise BenchError('Failed to load SSH key', e)
 
         if hasattr(self.manager, "hosts_with_users"):
             self._ip_user = {h["ip"]: h.get("user") for h in self.manager.hosts_with_users()}
+            #new added 
+            #print(f"Using SSH user: {user} for IP: {ip}")
+
         else:
             self._ip_user = {}
 
@@ -164,9 +175,11 @@ class Bench:
             ips = list(set([x for y in hosts for x in y]))
 
         Print.info(f'Updating {len(ips)} machines (branch "{self.settings.branch}")...')
+        print(f'[ -d {self.settings.repo_name} ] || git clone {self.settings.repo_url} {self.settings.repo_name}')
         cmd = [
                 #ensure repo exists
                 f'[ -d {self.settings.repo_name} ] || git clone {self.settings.repo_url} {self.settings.repo_name}',
+                
                 f'(cd {self.settings.repo_name} && git fetch -f)',
                 f'(cd {self.settings.repo_name} && git checkout -f {self.settings.branch})',
                 f'(cd {self.settings.repo_name} && git pull -f)',
@@ -174,14 +187,17 @@ class Bench:
                 'export PATH="$HOME/.cargo/bin:$PATH"',
                 f'(cd {self.settings.repo_name} && cargo build --release --features benchmark)',
         ]
-        # bin_dir =  f'./{self.settings.repo_name}/target/release'
-        # cmd = [
-        #     f'test -d {self.settings.repo_name} || (echo "Missing repo {self.settings.repo_name}" && false)',
-        #     'source $HOME/.cargo/env || true',
-        #     CommandMaker.alias_binaries(bin_dir)
-        # ]
+
 
         g = Group(*self._host_strings(ips), connect_kwargs=self.connect)
+
+        print(ips)
+
+        # Replace with actual IP and key path
+        #conn = Connection(host="10.10.0.30", user="santoshadhikari", connect_kwargs={"key_filename": "/home/santoshadhikari/.ssh/narwhal_rsa"})
+        #result = conn.run("whoami && echo ok", hide=True)
+        #print(result.stdout)
+        
         g.run(' && '.join(cmd), hide=True)
 
     def _config(self, hosts, node_parameters, bench_parameters):
