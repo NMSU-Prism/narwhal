@@ -57,12 +57,12 @@ class Bench:
     def _host_strings(self, ips):
         out = []
         for ip in ips:
-            user = self._ip_user.get(ip) or getattr(self.settings, "ssh_user", "santoshadhikari")
+            user = self._ip_user.get(ip) or getattr(self.settings, "ssh_user", "narwhal")
             out.append(f"{user}@{ip}")
         return out
 
     def _conn_for_ip(self, ip: str) -> Connection:
-        user = self._ip_user.get(ip) or getattr(self.settings, "ssh_user", "santoshadhikari")
+        user = self._ip_user.get(ip) or getattr(self.settings, "ssh_user", "narwhal")
         return Connection(host=ip, user=user, connect_kwargs=self.connect)
 
     def _check_stderr(self, output):
