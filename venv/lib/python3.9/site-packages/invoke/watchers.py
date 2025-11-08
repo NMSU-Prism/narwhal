@@ -1,5 +1,6 @@
 import re
 import threading
+from typing import Generator, Iterable
 
 from .exceptions import ResponseNotAccepted
 
@@ -15,10 +16,10 @@ class StreamWatcher(threading.local):
       subclasses *of* subclasses should be careful to make use of `super` where
       appropriate.
     * `submit` must accept the entire current contents of the stream being
-      watched, as a Unicode string, and may optionally return an iterable of
-      Unicode strings (or act as a generator iterator, i.e. multiple calls to
-      ``yield <unicode string>``), which will each be written to the
-      subprocess' standard input.
+      watched, as a string, and may optionally return an iterable of strings
+      (or act as a generator iterator, i.e. multiple calls to ``yield
+      <string>``), which will each be written to the subprocess' standard
+      input.
 
     .. note::
         `StreamWatcher` subclasses exist in part to enable state tracking, such
@@ -34,15 +35,15 @@ class StreamWatcher(threading.local):
     .. versionadded:: 1.0
     """
 
-    def submit(self, stream):
+    def submit(self, stream: str) -> Iterable[str]:
         """
         Act on ``stream`` data, potentially returning responses.
 
-        :param unicode stream:
+        :param str stream:
             All data read on this stream since the beginning of the session.
 
         :returns:
-            An iterable of Unicode strings (which may be empty).
+            An iterable of ``str`` (which may be empty).
 
         .. versionadded:: 1.0
         """
@@ -58,7 +59,7 @@ class Responder(StreamWatcher):
     .. versionadded:: 1.0
     """
 
-    def __init__(self, pattern, response):
+    def __init__(self, pattern: str, response: str) -> None:
         r"""
         Imprint this `Responder` with necessary parameters.
 
@@ -75,16 +76,18 @@ class Responder(StreamWatcher):
         self.response = response
         self.index = 0
 
-    def pattern_matches(self, stream, pattern, index_attr):
+    def pattern_matches(
+        self, stream: str, pattern: str, index_attr: str
+    ) -> Iterable[str]:
         """
         Generic "search for pattern in stream, using index" behavior.
 
         Used here and in some subclasses that want to track multiple patterns
         concurrently.
 
-        :param unicode stream: The same data passed to ``submit``.
-        :param unicode pattern: The pattern to search for.
-        :param unicode index_attr: The name of the index attribute to use.
+        :param str stream: The same data passed to ``submit``.
+        :param str pattern: The pattern to search for.
+        :param str index_attr: The name of the index attribute to use.
         :returns: An iterable of string matches.
 
         .. versionadded:: 1.0
@@ -93,15 +96,15 @@ class Responder(StreamWatcher):
         # once, e.g. in FailingResponder.
         # Only look at stream contents we haven't seen yet, to avoid dupes.
         index = getattr(self, index_attr)
-        new_ = stream[index:]
+        new = stream[index:]
         # Search, across lines if necessary
-        matches = re.findall(pattern, new_, re.S)
+        matches = re.findall(pattern, new, re.S)
         # Update seek index if we've matched
         if matches:
-            setattr(self, index_attr, index + len(new_))
+            setattr(self, index_attr, index + len(new))
         return matches
 
-    def submit(self, stream):
+    def submit(self, stream: str) -> Generator[str, None, None]:
         # Iterate over findall() response in case >1 match occurred.
         for _ in self.pattern_matches(stream, self.pattern, "index"):
             yield self.response
@@ -118,15 +121,15 @@ class FailingResponder(Responder):
     .. versionadded:: 1.0
     """
 
-    def __init__(self, pattern, response, sentinel):
-        super(FailingResponder, self).__init__(pattern, response)
+    def __init__(self, pattern: str, response: str, sentinel: str) -> None:
+        super().__init__(pattern, response)
         self.sentinel = sentinel
         self.failure_index = 0
         self.tried = False
 
-    def submit(self, stream):
+    def submit(self, stream: str) -> Generator[str, None, None]:
         # Behave like regular Responder initially
-        response = super(FailingResponder, self).submit(stream)
+        response = super().submit(stream)
         # Also check stream for our failure sentinel
         failed = self.pattern_matches(stream, self.sentinel, "failure_index")
         # Error out if we seem to have failed after a previous response.

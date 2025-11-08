@@ -16,9 +16,11 @@
 # along with Paramiko; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301 USA.
 
+from importlib import metadata
+
+__version__ = metadata.version("paramiko")
+
 # flake8: noqa
-import sys
-from paramiko._version import __version__, __version_info__
 from paramiko.transport import (
     SecurityOptions,
     ServiceRequestingTransport,
@@ -66,7 +68,6 @@ from paramiko.ssh_exception import (
 )
 from paramiko.server import ServerInterface, SubsystemHandler, InteractiveQuery
 from paramiko.rsakey import RSAKey
-from paramiko.dsskey import DSSKey
 from paramiko.ecdsakey import ECDSAKey
 from paramiko.ed25519key import Ed25519Key
 from paramiko.sftp import SFTPError, BaseSFTP
@@ -112,54 +113,8 @@ from paramiko.common import io_sleep
 
 
 # TODO: I guess a real plugin system might be nice for future expansion...
-key_classes = [DSSKey, RSAKey, Ed25519Key, ECDSAKey]
+key_classes = [RSAKey, Ed25519Key, ECDSAKey]
 
 
 __author__ = "Jeff Forcier <jeff@bitprophet.org>"
 __license__ = "GNU Lesser General Public License (LGPL)"
-
-# TODO 4.0: remove this, jeez
-__all__ = [
-    "Agent",
-    "AgentKey",
-    "AuthenticationException",
-    "AutoAddPolicy",
-    "BadAuthenticationType",
-    "BadHostKeyException",
-    "BufferedFile",
-    "Channel",
-    "ChannelException",
-    "ConfigParseError",
-    "CouldNotCanonicalize",
-    "DSSKey",
-    "ECDSAKey",
-    "Ed25519Key",
-    "HostKeys",
-    "Message",
-    "MissingHostKeyPolicy",
-    "PKey",
-    "PasswordRequiredException",
-    "ProxyCommand",
-    "ProxyCommandFailure",
-    "RSAKey",
-    "RejectPolicy",
-    "SFTP",
-    "SFTPAttributes",
-    "SFTPClient",
-    "SFTPError",
-    "SFTPFile",
-    "SFTPHandle",
-    "SFTPServer",
-    "SFTPServerInterface",
-    "SSHClient",
-    "SSHConfig",
-    "SSHConfigDict",
-    "SSHException",
-    "SecurityOptions",
-    "ServerInterface",
-    "SubsystemHandler",
-    "Transport",
-    "WarningPolicy",
-    "io_sleep",
-    "util",
-]

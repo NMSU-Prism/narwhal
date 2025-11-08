@@ -1,5 +1,3 @@
-from __future__ import unicode_literals, print_function
-
 import getpass
 import inspect
 import json
@@ -7,8 +5,16 @@ import os
 import sys
 import textwrap
 from importlib import import_module  # buffalo buffalo
-
-from .util import six
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+)
 
 from . import Collection, Config, Executor, FilesystemLoader
 from .completion.complete import complete, print_completion_script
@@ -17,8 +23,13 @@ from .exceptions import UnexpectedExit, CollectionNotFound, ParseError, Exit
 from .terminals import pty_size
 from .util import debug, enable_logging, helpline
 
+if TYPE_CHECKING:
+    from .loader import Loader
+    from .parser import ParseResult
+    from .util import Lexicon
 
-class Program(object):
+
+class Program:
     """
     Manages top-level CLI invocation, typically via ``setup.py`` entrypoints.
 
@@ -32,7 +43,9 @@ class Program(object):
     .. versionadded:: 1.0
     """
 
-    def core_args(self):
+    core: "ParseResult"
+
+    def core_args(self) -> List["Argument"]:
         """
         Return default core `.Argument` objects, as a list.
 
@@ -136,7 +149,7 @@ class Program(object):
             ),
         ]
 
-    def task_args(self):
+    def task_args(self) -> List["Argument"]:
         """
         Return default task-related `.Argument` objects, as a list.
 
@@ -165,6 +178,7 @@ class Program(object):
             ),
         ]
 
+    argv: List[str]
     # Other class-level global variables a subclass might override sometime
     # maybe?
     leading_indent_width = 2
@@ -175,15 +189,15 @@ class Program(object):
 
     def __init__(
         self,
-        version=None,
-        namespace=None,
-        name=None,
-        binary=None,
-        loader_class=None,
-        executor_class=None,
-        config_class=None,
-        binary_names=None,
-    ):
+        version: Optional[str] = None,
+        namespace: Optional["Collection"] = None,
+        name: Optional[str] = None,
+        binary: Optional[str] = None,
+        loader_class: Optional[Type["Loader"]] = None,
+        executor_class: Optional[Type["Executor"]] = None,
+        config_class: Optional[Type["Config"]] = None,
+        binary_names: Optional[List[str]] = None,
+    ) -> None:
         """
         Create a new, parameterized `.Program` instance.
 
@@ -261,16 +275,16 @@ class Program(object):
         self.version = "unknown" if version is None else version
         self.namespace = namespace
         self._name = name
-        # TODO 2.0: rename binary to binary_help_name or similar. (Or write
+        # TODO 3.0: rename binary to binary_help_name or similar. (Or write
         # code to autogenerate it from binary_names.)
         self._binary = binary
         self._binary_names = binary_names
-        self.argv = None
+        self.argv = []
         self.loader_class = loader_class or FilesystemLoader
         self.executor_class = executor_class or Executor
         self.config_class = config_class or Config
 
-    def create_config(self):
+    def create_config(self) -> None:
         """
         Instantiate a `.Config` (or subclass, depending) for use in task exec.
 
@@ -285,7 +299,7 @@ class Program(object):
         """
         self.config = self.config_class()
 
-    def update_config(self, merge=True):
+    def update_config(self, merge: bool = True) -> None:
         """
         Update the previously instantiated `.Config` with parsed data.
 
@@ -338,7 +352,7 @@ class Program(object):
         if merge:
             self.config.merge()
 
-    def run(self, argv=None, exit=True):
+    def run(self, argv: Optional[List[str]] = None, exit: bool = True) -> None:
         """
         Execute main CLI logic, based on ``argv``.
 
@@ -407,7 +421,7 @@ class Program(object):
         except KeyboardInterrupt:
             sys.exit(1)  # Same behavior as Python itself outside of REPL
 
-    def parse_core(self, argv):
+    def parse_core(self, argv: Optional[List[str]]) -> None:
         debug("argv given to Program.run: {!r}".format(argv))
         self.normalize_argv(argv)
 
@@ -437,7 +451,7 @@ class Program(object):
             )
             raise Exit
 
-    def parse_collection(self):
+    def parse_collection(self) -> None:
         """
         Load a tasks collection & project-level config.
 
@@ -466,14 +480,14 @@ class Program(object):
         # Set these up for potential use later when listing tasks
         # TODO: be nice if these came from the config...! Users would love to
         # say they default to nested for example. Easy 2.x feature-add.
-        self.list_root = None
-        self.list_depth = None
+        self.list_root: Optional[str] = None
+        self.list_depth: Optional[int] = None
         self.list_format = "flat"
         self.scoped_collection = self.collection
 
         # TODO: load project conf, if possible, gracefully
 
-    def parse_cleanup(self):
+    def parse_cleanup(self) -> None:
         """
         Post-parsing, pre-execution steps such as --help, --list, etc.
 
@@ -505,7 +519,7 @@ class Program(object):
         self.list_depth = self.args["list-depth"].value
         if list_root:
             # Not just --list, but --list some-root - do moar work
-            if isinstance(list_root, six.string_types):
+            if isinstance(list_root, str):
                 self.list_root = list_root
                 try:
                     sub = self.collection.subcollection_from_path(list_root)
@@ -535,14 +549,14 @@ class Program(object):
         if not self.tasks and not self.collection.default:
             self.no_tasks_given()
 
-    def no_tasks_given(self):
+    def no_tasks_given(self) -> None:
         debug(
             "No tasks specified for execution and no default task; printing global help as fallback"  # noqa
         )
         self.print_help()
         raise Exit
 
-    def execute(self):
+    def execute(self) -> None:
         """
         Hand off data & tasks-to-execute specification to an `.Executor`.
 
@@ -568,7 +582,7 @@ class Program(object):
         executor = klass(self.collection, self.config, self.core)
         executor.execute(*self.tasks)
 
-    def normalize_argv(self, argv):
+    def normalize_argv(self, argv: Optional[List[str]]) -> None:
         """
         Massages ``argv`` into a useful list of strings.
 
@@ -586,13 +600,13 @@ class Program(object):
         if argv is None:
             argv = sys.argv
             debug("argv was None; using sys.argv: {!r}".format(argv))
-        elif isinstance(argv, six.string_types):
+        elif isinstance(argv, str):
             argv = argv.split()
             debug("argv was string-like; splitting: {!r}".format(argv))
         self.argv = argv
 
     @property
-    def name(self):
+    def name(self) -> str:
         """
         Derive program's human-readable name based on `.binary`.
 
@@ -601,7 +615,7 @@ class Program(object):
         return self._name or self.binary.capitalize()
 
     @property
-    def called_as(self):
+    def called_as(self) -> str:
         """
         Returns the program name we were actually called as.
 
@@ -610,10 +624,11 @@ class Program(object):
 
         .. versionadded:: 1.2
         """
-        return os.path.basename(self.argv[0])
+        # XXX: defaults to empty string if 'argv' is '[]' or 'None'
+        return os.path.basename(self.argv[0]) if self.argv else ""
 
     @property
-    def binary(self):
+    def binary(self) -> str:
         """
         Derive program's help-oriented binary name(s) from init args & argv.
 
@@ -622,7 +637,7 @@ class Program(object):
         return self._binary or self.called_as
 
     @property
-    def binary_names(self):
+    def binary_names(self) -> List[str]:
         """
         Derive program's completion-oriented binary name(s) from args & argv.
 
@@ -630,9 +645,9 @@ class Program(object):
         """
         return self._binary_names or [self.called_as]
 
-    # TODO 2.0: ugh rename this or core_args, they are too confusing
+    # TODO 3.0: ugh rename this or core_args, they are too confusing
     @property
-    def args(self):
+    def args(self) -> "Lexicon":
         """
         Obtain core program args from ``self.core`` parse result.
 
@@ -641,7 +656,7 @@ class Program(object):
         return self.core[0].args
 
     @property
-    def initial_context(self):
+    def initial_context(self) -> ParserContext:
         """
         The initial parser context, aka core program flags.
 
@@ -655,10 +670,10 @@ class Program(object):
             args += self.task_args()
         return ParserContext(args=args)
 
-    def print_version(self):
+    def print_version(self) -> None:
         print("{} {}".format(self.name, self.version or "unknown"))
 
-    def print_help(self):
+    def print_help(self) -> None:
         usage_suffix = "task1 [--task1-opts] ... taskN [--taskN-opts]"
         if self.namespace is not None:
             usage_suffix = "<subcommand> [--subcommand-opts] ..."
@@ -670,7 +685,7 @@ class Program(object):
         if self.namespace is not None:
             self.list_tasks()
 
-    def parse_core_args(self):
+    def parse_core_args(self) -> None:
         """
         Filter out core args, leaving any tasks or their args for later.
 
@@ -684,7 +699,7 @@ class Program(object):
         msg = "Core-args parse result: {!r} & unparsed: {!r}"
         debug(msg.format(self.core, self.core.unparsed))
 
-    def load_collection(self):
+    def load_collection(self) -> None:
         """
         Load a task collection based on parsed core args, or die trying.
 
@@ -693,7 +708,9 @@ class Program(object):
         # NOTE: start, coll_name both fall back to configuration values within
         # Loader (which may, however, get them from our config.)
         start = self.args["search-root"].value
-        loader = self.loader_class(config=self.config, start=start)
+        loader = self.loader_class(  # type: ignore
+            config=self.config, start=start
+        )
         coll_name = self.args.collection.value
         try:
             module, parent = loader.load(coll_name)
@@ -711,7 +728,9 @@ class Program(object):
         except CollectionNotFound as e:
             raise Exit("Can't find any collection named {!r}!".format(e.name))
 
-    def _update_core_context(self, context, new_args):
+    def _update_core_context(
+        self, context: ParserContext, new_args: Dict[str, Any]
+    ) -> None:
         # Update core context w/ core_via_task args, if and only if the
         # via-task version of the arg was truly given a value.
         # TODO: push this into an Argument-aware Lexicon subclass and
@@ -720,7 +739,7 @@ class Program(object):
             if arg.got_value:
                 context.args[key]._value = arg._value
 
-    def _make_parser(self):
+    def _make_parser(self) -> Parser:
         return Parser(
             initial=self.initial_context,
             contexts=self.collection.to_contexts(
@@ -728,7 +747,7 @@ class Program(object):
             ),
         )
 
-    def parse_tasks(self):
+    def parse_tasks(self) -> None:
         """
         Parse leftover args, which are typically tasks & per-task args.
 
@@ -752,7 +771,7 @@ class Program(object):
         self.tasks = result
         debug("Resulting task contexts: {!r}".format(self.tasks))
 
-    def print_task_help(self, name):
+    def print_task_help(self, name: str) -> None:
         """
         Print help for a specific task, e.g. ``inv --help <taskname>``.
 
@@ -785,7 +804,7 @@ class Program(object):
             print(self.leading_indent + "none")
             print("")
 
-    def list_tasks(self):
+    def list_tasks(self) -> None:
         # Short circuit if no tasks to show (Collection now implements bool)
         focus = self.scoped_collection
         if not focus:
@@ -795,22 +814,26 @@ class Program(object):
         # this a bit?
         getattr(self, "list_{}".format(self.list_format))()
 
-    def list_flat(self):
+    def list_flat(self) -> None:
         pairs = self._make_pairs(self.scoped_collection)
         self.display_with_columns(pairs=pairs)
 
-    def list_nested(self):
+    def list_nested(self) -> None:
         pairs = self._make_pairs(self.scoped_collection)
         extra = "'*' denotes collection defaults"
         self.display_with_columns(pairs=pairs, extra=extra)
 
-    def _make_pairs(self, coll, ancestors=None):
+    def _make_pairs(
+        self,
+        coll: "Collection",
+        ancestors: Optional[List[str]] = None,
+    ) -> List[Tuple[str, Optional[str]]]:
         if ancestors is None:
             ancestors = []
         pairs = []
         indent = len(ancestors) * self.indent
         ancestor_path = ".".join(x for x in ancestors)
-        for name, task in sorted(six.iteritems(coll.tasks)):
+        for name, task in sorted(coll.tasks.items()):
             is_default = name == coll.default
             # Start with just the name and just the aliases, no prefixes or
             # dots.
@@ -845,7 +868,7 @@ class Program(object):
             pairs.append((full, helpline(task)))
         # Determine whether we're at max-depth or not
         truncate = self.list_depth and (len(ancestors) + 1) >= self.list_depth
-        for name, subcoll in sorted(six.iteritems(coll.collections)):
+        for name, subcoll in sorted(coll.collections.items()):
             displayname = name
             if ancestors or self.list_root:
                 displayname = ".{}".format(displayname)
@@ -869,7 +892,7 @@ class Program(object):
                 pairs.extend(recursed_pairs)
         return pairs
 
-    def list_json(self):
+    def list_json(self) -> None:
         # Sanity: we can't cleanly honor the --list-depth argument without
         # changing the data schema or otherwise acting strangely; and it also
         # doesn't make a ton of sense to limit depth when the output is for a
@@ -885,7 +908,7 @@ class Program(object):
         data = coll.serialized()
         print(json.dumps(data))
 
-    def task_list_opener(self, extra=""):
+    def task_list_opener(self, extra: str = "") -> str:
         root = self.list_root
         depth = self.list_depth
         specifier = " '{}'".format(root) if root else ""
@@ -901,7 +924,9 @@ class Program(object):
             text = "Subcommands"
         return text
 
-    def display_with_columns(self, pairs, extra=""):
+    def display_with_columns(
+        self, pairs: Sequence[Tuple[str, Optional[str]]], extra: str = ""
+    ) -> None:
         root = self.list_root
         print("{}:\n".format(self.task_list_opener(extra=extra)))
         self.print_columns(pairs)
@@ -916,7 +941,9 @@ class Program(object):
             # TODO: trim/prefix dots
             print("Default{} task: {}\n".format(specific, default))
 
-    def print_columns(self, tuples):
+    def print_columns(
+        self, tuples: Sequence[Tuple[str, Optional[str]]]
+    ) -> None:
         """
         Print tabbed columns from (name, help) ``tuples``.
 
