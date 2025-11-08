@@ -1,5 +1,7 @@
 from collections import namedtuple
 from contextlib import contextmanager
+from types import TracebackType
+from typing import Any, Generator, List, IO, Optional, Tuple, Type, Union
 import io
 import logging
 import os
@@ -10,34 +12,23 @@ import sys
 # which is the only spot that performs this try/except to allow repackaged
 # Invoke to function (e.g. distro packages which unvendor the vendored bits and
 # thus must import our 'vendored' stuff from the overall environment.)
-# All other uses of six, Lexicon, etc should do 'from .util import six' etc.
+# All other uses of Lexicon, etc should do 'from .util import lexicon' etc.
 # Saves us from having to update the same logic in a dozen places.
 # TODO: would this make more sense to put _into_ invoke.vendor? That way, the
 # import lines which now read 'from .util import <third party stuff>' would be
 # more obvious. Requires packagers to leave invoke/vendor/__init__.py alone tho
-# NOTE: we also grab six.moves internals directly so other modules don't have
-# to worry about it (they can't rely on the imported 'six' directly via
-# attribute access, since six.moves does import shenanigans.)
 try:
     from .vendor.lexicon import Lexicon  # noqa
-    from .vendor import six
-    from .vendor.six.moves import reduce  # noqa
-
-    if six.PY3:
-        from .vendor import yaml3 as yaml  # noqa
-    else:
-        from .vendor import yaml2 as yaml  # noqa
+    from .vendor import yaml  # noqa
 except ImportError:
-    from lexicon import Lexicon  # noqa
-    import six
-    from six.moves import reduce  # noqa
-    import yaml  # noqa
+    from lexicon import Lexicon  # type: ignore[no-redef] # noqa
+    import yaml  # type: ignore[no-redef] # noqa
 
 
 LOG_FORMAT = "%(name)s.%(module)s.%(funcName)s: %(message)s"
 
 
-def enable_logging():
+def enable_logging() -> None:
     logging.basicConfig(level=logging.DEBUG, format=LOG_FORMAT)
 
 
@@ -48,11 +39,10 @@ if os.environ.get("INVOKE_DEBUG"):
 
 # Add top level logger functions to global namespace. Meh.
 log = logging.getLogger("invoke")
-for x in ("debug",):
-    globals()[x] = getattr(log, x)
+debug = log.debug
 
 
-def task_name_sort_key(name):
+def task_name_sort_key(name: str) -> Tuple[List[str], str]:
     """
     Return key tuple for use sorting dotted task names, via e.g. `sorted`.
 
@@ -71,7 +61,7 @@ def task_name_sort_key(name):
 
 # TODO: Make part of public API sometime
 @contextmanager
-def cd(where):
+def cd(where: str) -> Generator[None, None, None]:
     cwd = os.getcwd()
     os.chdir(where)
     try:
@@ -80,7 +70,7 @@ def cd(where):
         os.chdir(cwd)
 
 
-def has_fileno(stream):
+def has_fileno(stream: IO) -> bool:
     """
     Cleanly determine whether ``stream`` has a useful ``.fileno()``.
 
@@ -104,7 +94,7 @@ def has_fileno(stream):
         return False
 
 
-def isatty(stream):
+def isatty(stream: IO) -> Union[bool, Any]:
     """
     Cleanly determine whether ``stream`` is a TTY.
 
@@ -137,30 +127,7 @@ def isatty(stream):
     return False
 
 
-def encode_output(string, encoding):
-    """
-    Transform string-like object ``string`` into bytes via ``encoding``.
-
-    :returns: A byte-string (``str`` on Python 2, ``bytes`` on Python 3.)
-
-    .. versionadded:: 1.0
-    """
-    # Encode under Python 2 only, because of the common problem where
-    # sys.stdout/err on Python 2 end up using sys.getdefaultencoding(), which
-    # is frequently NOT the same thing as the real local terminal encoding
-    # (reflected as sys.stdout.encoding). I.e. even when sys.stdout.encoding is
-    # UTF-8, ascii is still actually used, and explodes.
-    # Python 3 doesn't have this problem, so we delegate encoding to the
-    # io.*Writer classes involved.
-    if six.PY2:
-        # TODO: split up encoding settings (currently, the one we are given -
-        # often a Runner.encoding value - is used for both input and output),
-        # only use the one for 'local encoding' here.
-        string = string.encode(encoding)
-    return string
-
-
-def helpline(obj):
+def helpline(obj: object) -> Optional[str]:
     """
     Yield an object's first docstring line, or None if there was no docstring.
 
@@ -195,7 +162,7 @@ class ExceptionHandlingThread(threading.Thread):
     .. versionadded:: 1.0
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         """
         Create a new exception-handling thread instance.
 
@@ -203,21 +170,28 @@ class ExceptionHandlingThread(threading.Thread):
         ``**kwargs`` for easier display of thread identity when raising
         captured exceptions.
         """
-        super(ExceptionHandlingThread, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         # No record of why, but Fabric used daemon threads ever since the
         # switch from select.select, so let's keep doing that.
         self.daemon = True
         # Track exceptions raised in run()
         self.kwargs = kwargs
-        self.exc_info = None
+        # TODO: legacy cruft that needs to be removed
+        self.exc_info: Optional[
+            Union[
+                Tuple[Type[BaseException], BaseException, TracebackType],
+                Tuple[None, None, None],
+            ]
+        ] = None
 
-    def run(self):
+    def run(self) -> None:
         try:
             # Allow subclasses implemented using the "override run()'s body"
             # approach to work, by using _run() instead of run(). If that
             # doesn't appear to be the case, then assume we're being used
             # directly and just use super() ourselves.
-            if hasattr(self, "_run") and callable(self._run):
+            # XXX https://github.com/python/mypy/issues/1424
+            if hasattr(self, "_run") and callable(self._run):  # type: ignore
                 # TODO: this could be:
                 # - io worker with no 'result' (always local)
                 # - tunnel worker, also with no 'result' (also always local)
@@ -232,9 +206,9 @@ class ExceptionHandlingThread(threading.Thread):
                 # and let it continue acting like a normal thread (meh)
                 # - assume the run/sudo/etc case will use a queue inside its
                 # worker body, orthogonal to how exception handling works
-                self._run()
+                self._run()  # type: ignore
             else:
-                super(ExceptionHandlingThread, self).run()
+                super().run()
         except BaseException:
             # Store for actual reraising later
             self.exc_info = sys.exc_info()
@@ -248,7 +222,7 @@ class ExceptionHandlingThread(threading.Thread):
                 name = self.kwargs["target"].__name__
             debug(msg.format(self.exc_info[1], name))  # noqa
 
-    def exception(self):
+    def exception(self) -> Optional["ExceptionWrapper"]:
         """
         If an exception occurred, return an `.ExceptionWrapper` around it.
 
@@ -264,7 +238,7 @@ class ExceptionHandlingThread(threading.Thread):
         return ExceptionWrapper(self.kwargs, *self.exc_info)
 
     @property
-    def is_dead(self):
+    def is_dead(self) -> bool:
         """
         Returns ``True`` if not alive and has a stored exception.
 
@@ -277,9 +251,9 @@ class ExceptionHandlingThread(threading.Thread):
         # be thorough?
         return (not self.is_alive()) and self.exc_info is not None
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         # TODO: beef this up more
-        return self.kwargs["target"].__name__
+        return str(self.kwargs["target"].__name__)
 
 
 # NOTE: ExceptionWrapper defined here, not in exceptions.py, to avoid circular

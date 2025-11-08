@@ -9,20 +9,22 @@ not be included in the Sphinx API documentation.
 """
 
 import os
-
-from .util import six
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Mapping, Sequence
 
 from .exceptions import UncastableEnvVar, AmbiguousEnvVar
 from .util import debug
 
+if TYPE_CHECKING:
+    from .config import Config
 
-class Environment(object):
-    def __init__(self, config, prefix):
+
+class Environment:
+    def __init__(self, config: "Config", prefix: str) -> None:
         self._config = config
         self._prefix = prefix
-        self.data = {}  # Accumulator
+        self.data: Dict[str, Any] = {}  # Accumulator
 
-    def load(self):
+    def load(self) -> Dict[str, Any]:
         """
         Return a nested dict containing values from `os.environ`.
 
@@ -36,14 +38,16 @@ class Environment(object):
         m = "Scanning for env vars according to prefix: {!r}, mapping: {!r}"
         debug(m.format(self._prefix, env_vars))
         # Check for actual env var (honoring prefix) and try to set
-        for env_var, key_path in six.iteritems(env_vars):
+        for env_var, key_path in env_vars.items():
             real_var = (self._prefix or "") + env_var
             if real_var in os.environ:
                 self._path_set(key_path, os.environ[real_var])
         debug("Obtained env var config: {!r}".format(self.data))
         return self.data
 
-    def _crawl(self, key_path, env_vars):
+    def _crawl(
+        self, key_path: List[str], env_vars: Mapping[str, Sequence[str]]
+    ) -> Dict[str, Any]:
         """
         Examine config at location ``key_path`` & return potential env vars.
 
@@ -57,7 +61,7 @@ class Environment(object):
 
         Returns another dictionary of new keypairs as per above.
         """
-        new_vars = {}
+        new_vars: Dict[str, List[str]] = {}
         obj = self._path_get(key_path)
         # Sub-dict -> recurse
         if (
@@ -81,10 +85,10 @@ class Environment(object):
             new_vars[self._to_env_var(key_path)] = key_path
         return new_vars
 
-    def _to_env_var(self, key_path):
+    def _to_env_var(self, key_path: Iterable[str]) -> str:
         return "_".join(key_path).upper()
 
-    def _path_get(self, key_path):
+    def _path_get(self, key_path: Iterable[str]) -> "Config":
         # Gets are from self._config because that's what determines valid env
         # vars and/or values for typecasting.
         obj = self._config
@@ -92,7 +96,7 @@ class Environment(object):
             obj = obj[key]
         return obj
 
-    def _path_set(self, key_path, value):
+    def _path_set(self, key_path: Sequence[str], value: str) -> None:
         # Sets are to self.data since that's what we are presenting to the
         # outer config object and debugging.
         obj = self.data
@@ -101,19 +105,19 @@ class Environment(object):
                 obj[key] = {}
             obj = obj[key]
         old = self._path_get(key_path)
-        new_ = self._cast(old, value)
-        obj[key_path[-1]] = new_
+        new = self._cast(old, value)
+        obj[key_path[-1]] = new
 
-    def _cast(self, old, new_):
+    def _cast(self, old: Any, new: Any) -> Any:
         if isinstance(old, bool):
-            return new_ not in ("0", "")
-        elif isinstance(old, six.string_types):
-            return new_
+            return new not in ("0", "")
+        elif isinstance(old, str):
+            return new
         elif old is None:
-            return new_
+            return new
         elif isinstance(old, (list, tuple)):
             err = "Can't adapt an environment string into a {}!"
             err = err.format(type(old))
             raise UncastableEnvVar(err)
         else:
-            return old.__class__(new_)
+            return old.__class__(new)

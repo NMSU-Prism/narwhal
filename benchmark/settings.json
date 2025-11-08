@@ -1,9 +1,9 @@
 {
   "key": {
     "name": "local",
-    "path": "/home/santoshadhikari/.ssh/narwhal_rsa"
+    "path": "/home/narwhal/.ssh/id_rsa"
   },
-  "ssh_user": "santosh",
+  "ssh_user": "narwhal",
   "port": 5000,
   "repo": {
     "name": "narwhal",
