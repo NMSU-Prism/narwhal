@@ -96,7 +96,7 @@ impl BatchMaker {
                     .arg("-bench=^BenchmarkEVM$")
                     .arg("-benchmem")
                     .arg("-count=1")
-                    //.current_dir("/home/narwhal/go-ethereum/tests") // set working dir
+                    .current_dir("/home/narwhal/go-ethereum/tests") // set working dir
                     .output() // blocks until command finishes
                     .expect("Failed to run EVM code");
 
