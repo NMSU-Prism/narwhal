@@ -119,6 +119,9 @@ impl Core {
         self.current_header = header.clone();
         self.votes_aggregator = VotesAggregator::new();
 
+        //include execution of hearder/block in here
+
+        
         // Broadcast the new header in a reliable manner.
         let addresses = self
             .committee
