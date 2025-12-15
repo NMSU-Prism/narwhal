@@ -1,5 +1,5 @@
 // Copyright(C) Facebook, Inc. and its affiliates.
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::{crate_name, crate_version, App, AppSettings, ArgMatches, SubCommand};
 use config::Export as _;
 use config::Import as _;
@@ -10,12 +10,13 @@ use primary::{Certificate, Primary};
 use store::Store;
 use tokio::sync::mpsc::{channel, Receiver};
 use worker::Worker;
+use revm::context::ContextTr;
+
 
 
 /****************/
 //Addition
 
-use eyre::{bail, Result};
 use rlp::Rlp;
 use sha3::{Digest, Keccak256};
 use std::{
@@ -25,9 +26,12 @@ use std::{
     path::Path,
 };
 
-use narwhal_types::{Certificate, BatchDigest};         // e.g. types crate
-use narwhal_worker::Batch;                             // e.g. worker crate
-use narwhal_store::Store;                              // e.g. store crate
+//use narwhal_types::{Certificate, BatchDigest};         // e.g. types crate
+use crypto::Digest as BatchDigest;
+//use worker::Batch;                             // e.g. worker crate
+use worker::batch_maker::Batch;
+
+//use store::Store;                              // e.g. store crate
 
 use k256::ecdsa::{Signature as EcdsaSignature, RecoveryId, VerifyingKey};
 
@@ -36,7 +40,7 @@ use revm::{
     primitives::{Address, Bytes, TxKind, U256},
     state::AccountInfo,
     context::{BlockEnv, TxEnv},
-    Context,
+    Context as evmContext,
     ExecuteCommitEvm,
     MainBuilder,
     MainContext,
@@ -146,6 +150,8 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
     // Make the data store.
     let store = Store::new(store_path).context("Failed to create a store")?;
 
+    let store_clone = store.clone();
+
     // Channels the sequence of certificates.
     let (tx_output, rx_output) = channel(CHANNEL_CAPACITY);
 
@@ -185,7 +191,7 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
     }
 
     // Analyze the consensus' output.
-    analyze(rx_output, store.batch_store.clone()).await;
+    analyze(rx_output, store_clone).await;
 
     // If this expression is reached, the program ends and all other tasks terminate.
     unreachable!();
@@ -204,26 +210,25 @@ Application/Execution Logic
 
 ************************/
 
-fn extract_raw_txs_from_certificate(
+async fn extract_raw_txs_from_certificate(
     cert: &Certificate,
-    batch_store: &Store<BatchDigest, Batch>,
+    batch_store: &mut Store,
 ) -> anyhow::Result<Vec<Vec<u8>>> {
     let mut raw_blocks = Vec::new();
 
-    // Depending on your Narwhal version, this might be:
-    // - BTreeMap<BatchDigest, WorkerId>
-    // - Vec<(BatchDigest, WorkerId)>
-    // Adjust the iteration accordingly.
     for (digest, _worker_id) in cert.header.payload.iter() {
-        if let Some(batch) = batch_store.read(digest)? {
-            // Adjust to your Batch representation.
-            // In the original Narwhal code, Batch is a Vec<Transaction>,
-            // and Transaction is basically a wrapper around Vec<u8>.
-            for tx in batch.transactions() {
-                // if Transaction is a newtype around Vec<u8>,
-                // you may need `tx.0.clone()` instead.
-                raw_blocks.push(tx.to_vec());
-            }
+        // Store expects Key=Vec<u8>
+        let key: Vec<u8> = digest.as_ref().to_vec();
+
+        // Store::read is async and takes &mut self
+        if let Some(batch_bytes) = batch_store.read(key).await? {
+            // IMPORTANT:
+            // In Narwhal, the batch is stored as serialized bytes.
+            // At this point you have raw bytes. You can push the whole batch:
+            raw_blocks.push(batch_bytes);
+
+            // If you *really* need individual transactions, you must deserialize `batch_bytes`
+            // according to how Narwhal serializes batches in your version.
         }
     }
 
@@ -275,16 +280,16 @@ fn recover_sender_from_rlp(rlp: &Rlp, tx_index: usize) -> Result<Address> {
     let v: u64 = rlp
         .at(6)?
         .as_val()
-        .map_err(|e| eyre::eyre!("Tx #{tx_index}: v decode error: {e}"))?;
+        .map_err(|e| anyhow!("Tx #{tx_index}: v decode error: {e}"))?;
 
     let r_bytes = rlp
         .at(7)?
         .data()
-        .map_err(|e| eyre::eyre!("Tx #{tx_index}: r decode error: {e}"))?;
+        .map_err(|e| anyhow!("Tx #{tx_index}: r decode error: {e}"))?;
     let s_bytes = rlp
         .at(8)?
         .data()
-        .map_err(|e| eyre::eyre!("Tx #{tx_index}: s decode error: {e}"))?;
+        .map_err(|e| anyhow!("Tx #{tx_index}: s decode error: {e}"))?;
 
     if r_bytes.len() > 32 || s_bytes.len() > 32 {
         bail!(
@@ -310,15 +315,15 @@ fn recover_sender_from_rlp(rlp: &Rlp, tx_index: usize) -> Result<Address> {
     };
 
     let rec_id = RecoveryId::from_byte(recid_u8)
-        .ok_or_else(|| eyre::eyre!("Tx #{tx_index}: bad recovery id {recid_u8}"))?;
+        .ok_or_else(|| anyhow!("Tx #{tx_index}: bad recovery id {recid_u8}"))?;
 
     // Signature from bytes
     let sig = EcdsaSignature::from_slice(&sig_bytes)
-        .map_err(|e| eyre::eyre!("Tx #{tx_index}: bad r,s signature: {e}"))?;
+        .map_err(|e| anyhow!("Tx #{tx_index}: bad r,s signature: {e}"))?;
 
     // Recover verifying key from prehash
     let vk = VerifyingKey::recover_from_prehash(&sighash, &sig, rec_id)
-        .map_err(|e| eyre::eyre!("Tx #{tx_index}: failed to recover pubkey: {e}"))?;
+        .map_err(|e| anyhow!("Tx #{tx_index}: failed to recover pubkey: {e}"))?;
 
     // Ethereum address = last 20 bytes of keccak256(uncompressed_pubkey[1..])
     let uncompressed = vk.to_encoded_point(false);
@@ -353,21 +358,21 @@ fn decode_legacy_tx(raw: &[u8], tx_index: usize) -> Result<DecodedTx> {
     let nonce: u64 = rlp
         .at(0)?
         .as_val()
-        .map_err(|e| eyre::eyre!("Tx #{tx_index}: nonce decode error: {e}"))?;
+        .map_err(|e| anyhow!("Tx #{tx_index}: nonce decode error: {e}"))?;
     let gas_price_u128: u128 = rlp
         .at(1)?
         .as_val()
-        .map_err(|e| eyre::eyre!("Tx #{tx_index}: gasPrice decode error: {e}"))?;
+        .map_err(|e| anyhow!("Tx #{tx_index}: gasPrice decode error: {e}"))?;
     let gas_limit: u64 = rlp
         .at(2)?
         .as_val()
-        .map_err(|e| eyre::eyre!("Tx #{tx_index}: gasLimit decode error: {e}"))?;
+        .map_err(|e| anyhow!("Tx #{tx_index}: gasLimit decode error: {e}"))?;
 
     // ----- To / kind -----
     let to_bytes = rlp
         .at(3)?
         .data()
-        .map_err(|e| eyre::eyre!("Tx #{tx_index}: to field decode error: {e}"))?;
+        .map_err(|e| anyhow!("Tx #{tx_index}: to field decode error: {e}"))?;
 
     let kind = if to_bytes.is_empty() {
         // Contract creation
@@ -388,21 +393,21 @@ fn decode_legacy_tx(raw: &[u8], tx_index: usize) -> Result<DecodedTx> {
     let value_bytes = rlp
         .at(4)?
         .data()
-        .map_err(|e| eyre::eyre!("Tx #{tx_index}: value decode error: {e}"))?;
+        .map_err(|e| anyhow!("Tx #{tx_index}: value decode error: {e}"))?;
     let value = U256::from_be_slice(value_bytes);
 
     // ----- Data -----
     let data_bytes = rlp
         .at(5)?
         .data()
-        .map_err(|e| eyre::eyre!("Tx #{tx_index}: data decode error: {e}"))?;
+        .map_err(|e| anyhow!("Tx #{tx_index}: data decode error: {e}"))?;
     let data: Bytes = data_bytes.to_vec().into();
 
     // ----- v / chain_id -----
     let v: u64 = rlp
         .at(6)?
         .as_val()
-        .map_err(|e| eyre::eyre!("Tx #{tx_index}: v decode error: {e}"))?;
+        .map_err(|e| anyhow!("Tx #{tx_index}: v decode error: {e}"))?;
 
     let chain_id = if v >= 35 {
         Some(((v - 35) / 2) as u64)
@@ -427,10 +432,10 @@ fn decode_legacy_tx(raw: &[u8], tx_index: usize) -> Result<DecodedTx> {
 }
 
 async fn analyze(mut rx_output: Receiver<Certificate>,
-    batch_store: &Store<BatchDigest, Batch>) {
+    mut batch_store: Store) -> anyhow::Result<()> {
 
 
-    let mut out = File::create(result_path)?;
+    let mut out = File::create("result.txt")?;
 
 
 
@@ -442,11 +447,11 @@ async fn analyze(mut rx_output: Receiver<Certificate>,
     // Local nonce tracking per sender so revm is happy
     let mut local_nonces: HashMap<Address, u64> = HashMap::new();
 
-    for tx in &decoded_txs {
-        if seen_senders.insert(tx.sender) {
-            db.insert_account_info(tx.sender, AccountInfo::from_balance(rich_balance));
-        }
-    }
+    // for tx in &decoded_txs {
+    //     if seen_senders.insert(tx.sender) {
+    //         db.insert_account_info(tx.sender, AccountInfo::from_balance(rich_balance));
+    //     }
+    // }
 
     // Block environment (tune if desired)
     let block_env = BlockEnv {
@@ -457,15 +462,17 @@ async fn analyze(mut rx_output: Receiver<Certificate>,
     };
 
     // Build Context and EVM using the already-working Mainnet API
-    let ctx = Context::mainnet()
+    let ctx = evmContext::mainnet()
         .with_db(db)
         .with_block(block_env);
 
     let mut evm: MainnetEvm<_> = ctx.build_mainnet();
 
-    while let Some(_certificate) = rx_output.recv().await {
+    while let Some(certificate) = rx_output.recv().await {
 
-        let raw_blocks = extract_raw_txs_from_certificate(&certificate, &batch_store)?;
+       
+        let raw_blocks = extract_raw_txs_from_certificate(&certificate, &mut batch_store).await?;
+
 
         //Decode + recover real senders
         let mut decoded_txs: Vec<DecodedTx> = Vec::new();
@@ -488,7 +495,7 @@ async fn analyze(mut rx_output: Receiver<Certificate>,
         // Pre-fund any previously unseen senders (global across certs).
         for tx in &decoded_txs {
             if seen_senders.insert(tx.sender) {
-                db.insert_account_info(tx.sender, AccountInfo::from_balance(rich_balance));
+                evm.ctx.db_mut().insert_account_info(tx.sender, AccountInfo::from_balance(rich_balance));
             }
         }        
 
@@ -539,7 +546,10 @@ async fn analyze(mut rx_output: Receiver<Certificate>,
             writeln!(out, "--- State Changes: (not dumped in this version) ---")?;
         }
 
-        println!("All results written to {}", result_path);
-        Ok(())
+        println!("All results written to result.txt");
+
     }
+
+    Ok(())
+
 }
