@@ -11,6 +11,8 @@ use store::Store;
 use tokio::sync::mpsc::{channel, Receiver};
 use worker::Worker;
 use revm::context::ContextTr;
+use std::fs::{OpenOptions};
+
 
 
 
@@ -22,7 +24,7 @@ use sha3::{Digest, Keccak256};
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, self, Write},
     path::Path,
 };
 
@@ -217,6 +219,10 @@ async fn extract_raw_txs_from_certificate(
     let mut raw_blocks = Vec::new();
 
     for (digest, _worker_id) in cert.header.payload.iter() {
+
+        // println!("Extracting batch with digest: {:?}", digest);
+        // println!("Extracting batch with worker: {:?}", _worker_id);
+
         // Store expects Key=Vec<u8>
         let key: Vec<u8> = digest.as_ref().to_vec();
 
@@ -435,7 +441,11 @@ async fn analyze(mut rx_output: Receiver<Certificate>,
     mut batch_store: Store) -> anyhow::Result<()> {
 
 
-    let mut out = File::create("result.txt")?;
+    // let mut out = File::create("result.txt")?;
+       let mut out = OpenOptions::new()
+        .create(true)        // Create the file if it doesn't exist
+        .append(true)        // Open in append mode (do not overwrite)
+        .open("result.txt")?; // Open the fil
 
 
 
