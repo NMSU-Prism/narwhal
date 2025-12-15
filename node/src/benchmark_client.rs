@@ -187,7 +187,7 @@ impl Client {
                   
 
                     // Open the file that contains your bytes
-                    let mut file = File::open("transaction.bin").expect("Failed to open transaction file");
+                    let mut file = File::open("/home/narwhal/attack_testbed/transaction.txt").expect("Failed to open transaction file");
 
                     // Read all bytes from the file
                     let mut buffer = Vec::new();
