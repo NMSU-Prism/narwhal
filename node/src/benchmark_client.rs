@@ -194,7 +194,7 @@ impl Client {
 
 
        // Read + parse tx list once
-        let mut file = File::open("/home/narwhal/attack_testbed/transaction.txt")
+        let mut file = File::open("/home/narwhal/narwhal/thirdparty/test_evm/transaction.txt")
             .context("Failed to open transaction.txt")?;
 
         let mut text = String::new();

@@ -288,7 +288,7 @@ pub async fn extract_raw_txs_from_certificate_via_workers(
                             match stored_msg {
                                 WorkerMessage::Batch(batch) => {
                                     for tx in batch {
-                                        writeln!(out, "Transaction size (bytes): {}", tx.len()).unwrap();
+                                        //writeln!(out, "Transaction size (bytes): {}", tx.len()).unwrap();
                                         raw_txs.push(tx);
                                     }
                                 }
