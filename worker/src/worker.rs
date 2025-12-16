@@ -37,7 +37,12 @@ pub type SerializedBatchDigestMessage = Vec<u8>;
 pub enum WorkerMessage {
     Batch(Batch),
     BatchRequest(Vec<Digest>, /* origin */ PublicKey),
+    // NEW: request/response for execution clients
+    ExecBatchRequest(Vec<Digest>),
+    ExecBatchResponse(Vec<(Digest, SerializedBatchMessage)>),
 }
+
+
 
 pub struct Worker {
     /// The public key of this authority.
@@ -211,6 +216,7 @@ impl Worker {
             WorkerReceiverHandler {
                 tx_helper,
                 tx_processor,
+                store: self.store.clone(), // NEW
             },
         );
 
@@ -265,6 +271,7 @@ impl MessageHandler for TxReceiverHandler {
 struct WorkerReceiverHandler {
     tx_helper: Sender<(Vec<Digest>, PublicKey)>,
     tx_processor: Sender<SerializedBatchMessage>,
+    store: Store, // NEW
 }
 
 #[async_trait]
@@ -285,6 +292,32 @@ impl MessageHandler for WorkerReceiverHandler {
                 .send((missing, requestor))
                 .await
                 .expect("Failed to send batch request"),
+            // NEW: execution client path: respond on the SAME connection.
+            Ok(WorkerMessage::ExecBatchRequest(digests)) => {
+                let mut out: Vec<(Digest, SerializedBatchMessage)> = Vec::with_capacity(digests.len());
+ 
+                for d in digests {
+                    // IMPORTANT: worker stores batches keyed by digest bytes.
+                    let key: Vec<u8> = d.to_vec(); // if your Digest API differs, use d.as_ref().to_vec()
+                    let mut store = self.store.clone();
+
+                    if let Some(bytes) = store.read(key).await? {
+                        out.push((d, bytes));
+                    }
+                }
+ 
+                let resp = WorkerMessage::ExecBatchResponse(out);
+                let resp_bytes = bincode::serialize(&resp)?;
+                writer.send(Bytes::from(resp_bytes)).await?;
+            }
+
+            // ✅ NEW: ignore unexpected responses on this endpoint (or log them)
+            Ok(WorkerMessage::ExecBatchResponse(_)) => {
+                // This worker-side receiver normally shouldn't get responses.
+                // Log + ignore to satisfy exhaustive match.
+                warn!("Unexpected ExecBatchResponse received by worker receiver");
+            }
+
             Err(e) => warn!("Serialization error: {}", e),
         }
         Ok(())

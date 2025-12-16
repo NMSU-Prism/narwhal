@@ -14,13 +14,27 @@ use revm::context::ContextTr;
 use std::fs::{OpenOptions};
 
 
+use async_trait::async_trait;
+use std::time::Duration;
+use tokio::time::timeout;
+use worker::worker::WorkerMessage;
+use sha3::Digest;
 
+
+
+use bytes::Bytes as normal_bytes;
+use futures::{SinkExt, StreamExt};
+use std::net::SocketAddr;
+use tokio::net::TcpStream;
+use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 /****************/
 //Addition
 
 use rlp::Rlp;
-use sha3::{Digest, Keccak256};
+
+use sha3::Keccak256;
+
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
@@ -140,7 +154,7 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
     let keypair = KeyPair::import(key_file).context("Failed to load the node's keypair")?;
     let committee =
         Committee::import(committee_file).context("Failed to load the committee information")?;
-
+    let committee_clone = committee.clone();
     // Load default parameters if none are specified.
     let parameters = match parameters_file {
         Some(filename) => {
@@ -152,7 +166,9 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
     // Make the data store.
     let store = Store::new(store_path).context("Failed to create a store")?;
 
-    let store_clone = store.clone();
+   // Clone BEFORE it gets moved into spawn().
+    let store_primary = store.clone();
+    let store_worker  = store.clone();
 
     // Channels the sequence of certificates.
     let (tx_output, rx_output) = channel(CHANNEL_CAPACITY);
@@ -167,7 +183,7 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
                 keypair,
                 committee.clone(),
                 parameters.clone(),
-                store,
+                store_primary,
                 /* tx_consensus */ tx_new_certificates,
                 /* rx_consensus */ rx_feedback,
             );
@@ -187,13 +203,16 @@ async fn run(matches: &ArgMatches<'_>) -> Result<()> {
                 .unwrap()
                 .parse::<WorkerId>()
                 .context("The worker id must be a positive integer")?;
-            Worker::spawn(keypair.name, id, committee, parameters, store);
+            Worker::spawn(keypair.name, id, committee, parameters, store_worker);
         }
         _ => unreachable!(),
     }
 
+    //  let store_clone = store.clone();
+
+
     // Analyze the consensus' output.
-    analyze(rx_output, store_clone).await;
+    analyze(rx_output, committee_clone).await;
 
     // If this expression is reached, the program ends and all other tasks terminate.
     unreachable!();
@@ -212,34 +231,124 @@ Application/Execution Logic
 
 ************************/
 
-async fn extract_raw_txs_from_certificate(
+pub async fn extract_raw_txs_from_certificate_via_workers(
     cert: &Certificate,
-    batch_store: &mut Store,
+    committee: &Committee,
+    out: &mut std::fs::File,
 ) -> anyhow::Result<Vec<Vec<u8>>> {
-    let mut raw_blocks = Vec::new();
+    // Group digests per worker.
+    let mut by_worker: HashMap<WorkerId, Vec<BatchDigest>> = HashMap::new();
+    for (digest, worker_id) in cert.header.payload.iter() {
+        // by_worker.entry(*worker_id).or_default().push(*digest);
+        by_worker.entry(*worker_id).or_default().push(digest.clone());
 
-    for (digest, _worker_id) in cert.header.payload.iter() {
-
-        // println!("Extracting batch with digest: {:?}", digest);
-        // println!("Extracting batch with worker: {:?}", _worker_id);
-
-        // Store expects Key=Vec<u8>
-        let key: Vec<u8> = digest.as_ref().to_vec();
-
-        // Store::read is async and takes &mut self
-        if let Some(batch_bytes) = batch_store.read(key).await? {
-            // IMPORTANT:
-            // In Narwhal, the batch is stored as serialized bytes.
-            // At this point you have raw bytes. You can push the whole batch:
-            raw_blocks.push(batch_bytes);
-
-            // If you *really* need individual transactions, you must deserialize `batch_bytes`
-            // according to how Narwhal serializes batches in your version.
+    }
+ 
+    let mut raw_txs: Vec<Vec<u8>> = Vec::new();
+ 
+    for (worker_id, digests) in by_worker {
+        // Resolve the worker endpoint for the CERT AUTHOR (not you).
+        let addr = committee
+            .worker(&cert.header.author, &worker_id)
+            .with_context(|| format!("No worker addr for author={:?} worker_id={}", cert.header.author, worker_id))?
+            .worker_to_worker;
+ 
+        // Connect, send ExecBatchRequest, read ExecBatchResponse.
+        let stream = TcpStream::connect(addr)
+            .await
+            .with_context(|| format!("Failed to connect to worker {} at {}", worker_id, addr))?;
+ 
+        let mut framed = Framed::new(stream, LengthDelimitedCodec::new());
+ 
+        let req = WorkerMessage::ExecBatchRequest(digests);
+        let req_bytes = bincode::serialize(&req).context("serialize ExecBatchRequest")?;
+ 
+        framed.send(normal_bytes::from(req_bytes)).await.context("send ExecBatchRequest")?;
+ 
+        // We may receive an "Ack" frame first depending on timing and your handler.
+        // So loop until we see ExecBatchResponse.
+        loop {
+            let frame = framed
+                .next()
+                .await
+                .ok_or_else(|| anyhow!("Worker {} closed without response", worker_id))?
+                .context("read frame")?;
+ 
+            // Try deserialize as WorkerMessage; if it fails and it was "Ack", just continue.
+            if let Ok(msg) = bincode::deserialize::<WorkerMessage>(&frame) {
+                match msg {
+                    WorkerMessage::ExecBatchResponse(batches) => {
+                        for (_digest, serialized_batch_msg) in batches {
+                            writeln!(out, "Extracting batch from worker {} with digest: {:?}", worker_id, _digest).unwrap();
+                            // Worker stored the serialized WorkerMessage::Batch(Batch) bytes
+                            // (because Processor forwarded serialized bytes).
+                            let stored_msg: WorkerMessage =
+                                bincode::deserialize(&serialized_batch_msg).context("deserialize stored batch msg")?;
+ 
+                            match stored_msg {
+                                WorkerMessage::Batch(batch) => {
+                                    for tx in batch {
+                                        writeln!(out, "Transaction size (bytes): {}", tx.len()).unwrap();
+                                        raw_txs.push(tx);
+                                    }
+                                }
+                                _ => return Err(anyhow!("Store returned non-Batch message")),
+                            }
+                        }
+                        break;
+                    }
+                    _ => {
+                        // Ignore other messages in this channel.
+                    }
+                }
+            } else {
+                // If the worker also sends plaintext "Ack", ignore it.
+                if frame.as_ref() == b"Ack" {
+                    continue;
+                }
+            }
         }
     }
-
-    Ok(raw_blocks)
+ 
+    Ok(raw_txs)
 }
+
+// async fn extract_raw_txs_from_certificate(
+//     cert: &Certificate,
+//     batch_store: &mut Store,
+//     out: &mut std::fs::File,
+// ) -> anyhow::Result<Vec<Vec<u8>>> {
+//     let mut raw_blocks = Vec::new();
+
+//     for (digest, _worker_id) in cert.header.payload.iter() {
+
+//         writeln!(out, "Extracting batch with digest: {:?}", digest).unwrap();
+//         writeln!(out, "Extracting batch with worker: {:?}", _worker_id).unwrap();
+
+      
+
+//         // Store expects Key=Vec<u8>
+//         let key: Vec<u8> = digest.as_ref().to_vec();
+
+//         // Store::read is async and takes &mut self
+//         if let Some(batch_bytes) = batch_store.read(key).await? {
+//             // IMPORTANT:
+//             // In Narwhal, the batch is stored as serialized bytes.
+//             // At this point you have raw bytes. You can push the whole batch:
+            
+//             // raw_blocks.push(batch_bytes);
+
+//             raw_blocks.push(batch_bytes.clone()); // Clone batch_bytes to retain the original
+
+
+//             writeln!(out, "Batch size (bytes): {}", batch_bytes.len()).unwrap();
+//             // If you *really* need individual transactions, you must deserialize `batch_bytes`
+//             // according to how Narwhal serializes batches in your version.
+//         }
+//     }
+
+//     Ok(raw_blocks)
+// }
 
 
 /// Build the sighash for a legacy tx, handling both pre-EIP-155 and EIP-155.
@@ -438,7 +547,7 @@ fn decode_legacy_tx(raw: &[u8], tx_index: usize) -> Result<DecodedTx> {
 }
 
 async fn analyze(mut rx_output: Receiver<Certificate>,
-    mut batch_store: Store) -> anyhow::Result<()> {
+    committee: Committee) -> anyhow::Result<()> {
 
 
     // let mut out = File::create("result.txt")?;
@@ -450,7 +559,7 @@ async fn analyze(mut rx_output: Receiver<Certificate>,
 
 
     // Build initial DB with all unique senders pre-funded
-    let mut db = InMemoryDB::default();
+    let db = InMemoryDB::default();
     let rich_balance = U256::from(1_000_000_000_000_000_000_000_000u128); // 1e24 wei
 
     let mut seen_senders = HashSet::new();
@@ -480,8 +589,9 @@ async fn analyze(mut rx_output: Receiver<Certificate>,
 
     while let Some(certificate) = rx_output.recv().await {
 
-       
-        let raw_blocks = extract_raw_txs_from_certificate(&certificate, &mut batch_store).await?;
+
+
+        let raw_blocks = extract_raw_txs_from_certificate_via_workers(&certificate, &committee, &mut out).await?;
 
 
         //Decode + recover real senders
