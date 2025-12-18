@@ -18,6 +18,10 @@ use std::error::Error;
 use store::Store;
 use tokio::sync::mpsc::{channel, Sender};
 
+use std::net::SocketAddr;
+use crate::worker_http::spawn_worker_http;
+
+
 #[cfg(test)]
 #[path = "tests/worker_tests.rs"]
 pub mod worker_tests;
@@ -73,6 +77,28 @@ impl Worker {
             parameters,
             store,
         };
+
+
+
+          // ✅ NEW: start HTTP server for pulling batches by digest.
+        // Use a unique port per (authority, worker_id) by offsetting the existing transactions port.
+        let tx_addr = worker
+            .committee
+            .worker(&worker.name, &worker.id)
+            .expect("Our public key or worker id is not in the committee")
+            .transactions;
+
+        let http_port = tx_addr.port().saturating_add(1000); // pick an offset not used elsewhere
+        let http_addr: SocketAddr = SocketAddr::from(([0, 0, 0, 0], http_port));
+        spawn_worker_http(worker.store.clone(), http_addr);
+
+        info!("Worker {} HTTP batch API listening on {}", id, http_addr);
+        //  // ✅ NEW: start HTTP server for geth-sidecar/validators to pull batches by digest.
+        // // Port convention: 7100 + worker_id
+        // let http_port: u16 = 7100 + (id as u16);
+        // let http_addr: SocketAddr = SocketAddr::from(([0, 0, 0, 0], http_port));
+        // spawn_worker_http(worker.store.clone(), http_addr);
+
 
         // Spawn all worker tasks.
         let (tx_primary, rx_primary) = channel(CHANNEL_CAPACITY);
