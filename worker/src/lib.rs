@@ -12,3 +12,7 @@ pub mod worker;
 mod common;
 
 pub use crate::worker::Worker;
+
+pub mod eth_digest;
+pub mod worker_http;
+
