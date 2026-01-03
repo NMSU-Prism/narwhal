@@ -31,12 +31,15 @@ BASE_GENESIS = {
         "berlinBlock": 0,
         "londonBlock": 0,
         "terminalTotalDifficulty": 0,
-        "terminalTotalDifficultyPassed": True
-
+        "terminalTotalDifficultyPassed": True,
+        "clique": {
+            "period": 1,
+            "epoch": 30000
+        }
     },
     "nonce": "0x0",
-    "timestamp": "0x6490fdd2",
-    "extraData": "0x",
+    "timestamp": "0x0",
+    "extraData": "0x0000000000000000000000000000000000000000000000000000000000000000a08a32489df0c5df6aff02110802756412428b810000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
     "gasLimit": "0x4c4b400",
     "difficulty": "0x0",
     "mixHash": "0x" + "00" * 32,

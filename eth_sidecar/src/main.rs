@@ -118,6 +118,7 @@ async fn main() -> anyhow::Result<()> {
 
 
     let geth_rpc = std::env::var("GETH_RPC").unwrap_or_else(|_| "http://127.0.0.1:8545".to_string());
+    // let geth_rpc = std::env::var("GETH_RPC").unwrap_or_else(|_| "http://127.0.0.1:32771".to_string());
     println!("[sidecar] GETH_RPC = {}", geth_rpc);
     let post_results_to = std::env::var("POST_RESULTS_TO").ok();
 
