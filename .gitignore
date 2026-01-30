@@ -32,3 +32,5 @@ benchmark/result.txt
 script/mempool.csv
 benchmark/
 script/*.csv
+benchmark/
+script/*.csv
