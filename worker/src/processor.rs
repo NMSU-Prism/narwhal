@@ -8,11 +8,14 @@ use primary::WorkerPrimaryMessage;
 use std::convert::TryInto;
 use store::Store;
 use tokio::sync::mpsc::{Receiver, Sender};
+use std::env;
+
 
 // NEW: Ethereum digest + sidecar notify
 use crate::eth_digest::keccak256;
 use hex::ToHex;
 use serde::Serialize;
+// use serde::Serialize;
 
 #[cfg(test)]
 #[path = "tests/processor_tests.rs"]
@@ -37,11 +40,21 @@ struct SidecarDigestNotify {
     worker_id: u32,
 }
 
+#[derive(Serialize)]
+struct TxNotify<'a> {
+    tx: &'a str,        // "0x..."
+    worker_id: u32,
+}
+
 async fn notify_sidecar_digest(digest32: [u8; 32], worker_id: WorkerId) {
-    let base = match std::env::var("NARWHAL_SIDECAR_URL") {
-        Ok(v) if !v.trim().is_empty() => v,
-        _ => return, // sidecar not configured
-    };
+    // let base = match std::env::var("NARWHAL_SIDECAR_URL") {
+    //     Ok(v) if !v.trim().is_empty() => v,
+    //     _ => return, // sidecar not configured
+    // };
+
+    let base = env::var("NARWHAL_DIGEST_URL").unwrap_or_else(|_| "http://127.0.0.1:9050".to_string());
+    let url = format!("{}/digest", base.trim_end_matches('/'));
+
 
     let msg = SidecarDigestNotify {
         digest: format!("0x{}", digest32.encode_hex::<String>()),
@@ -50,11 +63,35 @@ async fn notify_sidecar_digest(digest32: [u8; 32], worker_id: WorkerId) {
 
     // Best-effort notify; do not block consensus pipeline on failures.
     let _ = reqwest::Client::new()
-        .post(format!("{}/digest", base.trim_end_matches('/')))
+        // .post(format!("{}/digest", base.trim_end_matches('/')))
+        .post(url)
         .json(&msg)
         .send()
         .await;
 }
+
+
+async fn post_raw_tx(geth_base: &str, worker_id: u32, raw_tx: &[u8]) {
+    let url = format!("{}/tx", geth_base.trim_end_matches('/'));
+    let tx_hex = format!("0x{}", hex::encode(raw_tx));
+
+    let _ = reqwest::Client::new()
+        .post(url)
+        .json(&TxNotify { tx: &tx_hex, worker_id })
+        .send()
+        .await;
+}
+
+async fn post_raw_tx_bytes(geth_base: &str, raw_tx: &[u8]) {
+    let url = format!("{}/tx", geth_base.trim_end_matches('/'));
+    let _ = reqwest::Client::new()
+        .post(url)
+        .header("Content-Type", "application/octet-stream")
+        .body(raw_tx.to_vec())
+        .send()
+        .await;
+}
+
 
 impl Processor {
     pub fn spawn(

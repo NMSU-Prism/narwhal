@@ -131,6 +131,18 @@ async fn post_exec_result(Json(r): Json<ExecResult>) -> StatusCode {
     StatusCode::OK
 }
 
+pub async fn post_raw_tx(geth_url: &str, raw_tx: &[u8]) {
+    let client = reqwest::Client::new();
+    let url = format!("{}/tx", geth_url.trim_end_matches('/'));
+
+    let _ = client
+        .post(&url)
+        .header("Content-Type", "application/octet-stream")
+        .body(raw_tx.to_vec())
+        .send()
+        .await;
+}
+
 
 pub fn spawn_worker_http(store: Store, addr: SocketAddr) {
     tokio::spawn(async move {

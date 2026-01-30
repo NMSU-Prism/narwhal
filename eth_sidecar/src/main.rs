@@ -183,9 +183,11 @@ async fn main() -> anyhow::Result<()> {
             // execute: push each raw tx to geth
             let mut ok = true;
             let mut tx_hashes = Vec::with_capacity(batch.len());
-            for (i, tx_bytes) in batch.iter().enumerate() {
+            let send_to_geth = false;
 
-                eprintln!("[sidecar] tx_bytes[0..8]={:02x?} len={}", &tx_bytes[..tx_bytes.len().min(8)], tx_bytes.len());
+
+            for (i, tx_bytes) in batch.iter().enumerate() {
+            if send_to_geth {
                 match geth_send_raw_tx(&client, &geth_rpc_bg, tx_bytes).await {
                     Ok(h) if !h.is_empty() => {
                         eprintln!("[sidecar] geth accepted tx[{}] hash={}", i, h);
@@ -200,7 +202,33 @@ async fn main() -> anyhow::Result<()> {
                         ok = false;
                     }
                 }
+            } else {
+                eprintln!(
+                    "[sidecar] DRY-RUN tx[{}] len={} (send disabled)",
+                    i,
+                    tx_bytes.len()
+                );
             }
+        }
+
+            // for (i, tx_bytes) in batch.iter().enumerate() {
+
+            //     eprintln!("[sidecar] tx_bytes[0..8]={:02x?} len={}", &tx_bytes[..tx_bytes.len().min(8)], tx_bytes.len());
+            //     match geth_send_raw_tx(&client, &geth_rpc_bg, tx_bytes).await {
+            //         Ok(h) if !h.is_empty() => {
+            //             eprintln!("[sidecar] geth accepted tx[{}] hash={}", i, h);
+            //             tx_hashes.push(h);
+            //         }
+            //         Err(e) => {
+            //             eprintln!("[sidecar] geth rejected tx[{}]: {}", i, e);
+            //             ok = false;
+            //         }
+            //         _ => {
+            //             eprintln!("[sidecar] geth returned empty hash for tx[{}]", i);
+            //             ok = false;
+            //         }
+            //     }
+            // }
             eprintln!("[sidecar] geth submit summary: ok={} hashes={}", ok, tx_hashes.len());
 
 
@@ -250,10 +278,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/digest", post(post_digest))
         .with_state(tx);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 9050));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 9051));
     let listener = tokio::net::TcpListener::bind(addr)
         .await
-        .context("bind sidecar :9050")?;
+        .context("bind sidecar :9051")?;
     axum::serve(listener, app).await?;
 
     Ok(())
